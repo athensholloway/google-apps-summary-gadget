@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Module>
+  <ModulePrefs title="Weekly Summary" height="300"/>
+  <UserPref name="hideAuthPopup" display_name="Hide Authentication Popup" datatype="bool" default_value="false"/>
+  <Content type="html">
+    <![CDATA[
+        <style type='text/css'>
+            .was-gadget-container{
+                padding:0px 3px;
+            }
+            .was-gadget {
+                width:144;
+                display:inline-block;
+            }
+            .was-gadget * {
+                font-family:Helvetica, Arial, sans-serif;
+                font-size:11px;
+            }
+            .was-gadget > .hide{
+                display:none;            
+            }
+            .was-gadget h2{
+                margin:15px 0px 7px 0px;
+                font-style:italic;
+                font-family:Georgia;
+            }
+            .was-gadget-appointments > p{
+                margin:0px;
+                padding:4px;
+                width:144px;
+            }
+            .was-gadget-documents > ul{
+                list-style-type:none;
+                margin:0px;
+                padding:0px;
+                width:144px;
+                height:144px;
+                overflow-y:auto;     
+            }
+            .was-gadget-documents .count{
+                font-size:9px;
+            }
+            .was-gadget-documents > ul > li{
+                margin:0px;
+                padding:0px;
+                border-bottom:1px dotted #ccc;
+                white-space: nowrap;
+                width: 144px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                height:20px;
+                line-height:20px;
+            }
+            [class^="icon-"],
+            [class*=" icon-"] {
+              display: inline-block;
+              width: 16px;
+              height: 16px;
+              margin-right: .5em;
+              line-height: 16px;
+              vertical-align: text-top;
+              background-image: url("http://weeklyactivitysummary.appspot.com/assets/img/was-gadget-icon-sprite.png");
+              background-position: 16px 16px;
+              background-repeat: no-repeat;
+            }
+            .icon-was-gadget-calendar{ background-position: 0 0; width: 16px; height: 16px; } 
+            .icon-was-gadget-document{ background-position: -66px 0; width: 16px; height: 16px; } 
+            .icon-was-gadget-drive{ background-position: -132px 0; width: 16px; height: 16px; } 
+            .icon-was-gadget-folder{ background-position: -198px 0; width: 17px; height: 13px; } 
+            .icon-was-gadget-powerpoint{ background-position: -265px 0; width: 16px; height: 16px; } 
+            .icon-was-gadget-presentation{ background-position: -331px 0; width: 16px; height: 16px; } 
+            .icon-was-gadget-spreadsheet{ background-position: -397px 0; width: 16px; height: 16px; } 
+            .icon-was-gadget-word{ background-position: -463px 0; width: 16px; height: 16px; } 
+            
+        </style>
+        <script src="//ajax.googleapis.com/ajax/libs/jquery/1.8.0/jquery.min.js"></script>
+        <script>
+                var calendarServiceProxy = (function(){
+                "use strict";
+                var self = this;
+                //setup api key and client id at https://code.google.com/apis/console/
+                var apiKey = 'AIzaSyCJJ9ztjS8ae-KXeOXLAhbwyLK9qyUtfxk';
+                var clientId = '160863633352.apps.googleusercontent.com';
+                var scopes = 'https://www.googleapis.com/auth/drive.readonly.metadata https://www.googleapis.com/auth/calendar.readonly';
+                var service;
+                var driveService;
+                var calendarService;
+                var lastWeek;        
+                var cachedCalendarEvents = [];        
+                function getLastWeekDates(){
+                    var curr = new Date(); // get current date
+                    var first = curr.getDate() - curr.getDay() - 7; // First day is the day of the month - the day of the week
+                    var last = first + 6; // last day is the first day + 6
+                    var firstday = new Date(curr.setDate(first));
+                    firstday.setUTCHours(0,0,0);
+                    var lastday = new Date(curr.setDate(last));
+                    lastday.setUTCHours(11,59,59);
+                    return {
+                        start:firstday.toISOString(),
+                        end:lastday.toISOString()
+                    };
+                }
+                function roundNumber(number, digits) {
+                    var multiple = Math.pow(10, digits);
+                    var rndedNum = Math.round(number * multiple) / multiple;
+                    return rndedNum;
+                }
+                function authenticate(callback) {
+                    gapi.auth.authorize({client_id: clientId, scope: scopes, immediate: false}, function(authResult){
+                        var success = (authResult && !authResult.error);
+                        if (success){
+                            gapi.client.load('calendar', 'v3', function() {
+                                service = gapi.client.calendar;
+                                calendarService = gapi.client.calendar;
+                                lastWeek = getLastWeekDates();
+                                updateAppointmentInformation();
+                            });
+                            gapi.client.load('drive', 'v2', function() {
+                                driveService = gapi.client.drive;
+                                listDriveFiles();
+                            });
+                        }
+                      if(callback){callback(success);}
+                    });
+                }
+                function getClassName(mimeType){
+                    if(mimeType.indexOf('folder') != -1)
+                        return 'icon-was-gadget-folder';
+                    if(mimeType.indexOf('folder') != -1)
+                        return 'icon-was-gadget-folder';
+                    if(mimeType.indexOf('powerpoint') != -1)                
+                        return 'icon-was-gadget-powerpoint';
+                    if(mimeType.indexOf('presentation') != -1)
+                        return 'icon-was-gadget-presentation';
+                    if(mimeType.indexOf('spreadsheet') != -1)
+                        return 'icon-was-gadget-spreadsheet';
+                    if(mimeType.indexOf('word') != -1)
+                        return 'icon-was-gadget-word';
+                    return 'icon-was-gadget-document';
+                }           
+                // **** reder documents ****
+                function listDriveFiles(){
+                    driveService.files.list({
+                                maxResults : 100
+                    }).execute(function(files){
+                        var $documents = $('.was-gadget-documents');
+                        var $ul = $documents.find('ul');
+                        $ul.find('li').remove();
+                        var len = files.items.length;
+                        //$('.was-gadget-document-count').text(len);
+                        for(var i = 0; i < len; i++){
+            $ul.append('<li><i class="'+getClassName(files.items[i].mimeType)+'"></i>'+files.items[i].userPermission.role+' - <a href="'+files.items[i].alternateLink+'" target="_blank">'+files.items[i].title+'</a></li>')
+                        }
+                        if (!$documents.is(':visible')){$documents.fadeIn();}
+                    });                
+                }
+                function load() {        
+                    gapi.client.setApiKey(apiKey);
+                    window.setTimeout(function(){
+                        authenticate();
+                    },1);
+                }
+                // **** reder appointments ****            
+                function renderCachedCalenderEventData(){
+                    var totalEvents = cachedCalendarEvents.length;
+                    var totalHours = 0;
+                    var $apointments = $('.was-gadget-appointments');
+                    for(var i = 0; i < totalEvents; i++){
+                        var startDate = new Date(cachedCalendarEvents[i].start.date || cachedCalendarEvents[i].start.dateTime);
+                        var endDate = new Date(cachedCalendarEvents[i].end.date || cachedCalendarEvents[i].end.dateTime);
+                        totalHours += ((endDate-startDate)/(1000*60*60)) 
+                    }
+                    $apointments.find('span.was-gadget-total-appointments').text(totalEvents);
+                    $apointments.find('span.was-gadget-total-appointment-hours').text(Math.floor(totalHours));
+                    if(!$apointments.is(':visible')){$apointments.fadeIn();}
+                }
+                function cacheCalendarEvents(calendarEvents){
+                    if(!calendarEvents){return;}
+                    for(var i = 0; i < calendarEvents.length;i++){
+                        cachedCalendarEvents.push(calendarEvents[i]);
+                    }
+                }
+                function updateAppointmentInformation(){
+                    if(!service){return;}
+                    
+                    var calendarEventsProcessorStack = [];            
+                    
+                    var calendarEventsCallbackHandler = function(calendarEvents){
+                        calendarEventsProcessorStack.pop()(calendarEvents.items);
+                        if(calendarEventsProcessorStack.length === 0){
+                            renderCachedCalenderEventData();
+                        }
+                    };
+                    cachedCalendarEvents.length = 0;    
+                    service.calendarList.list().execute(function(calendarList){
+                        var totalCalenders = calendarList.items.length;
+                        
+                        //push cacheCalendarEvents onto calendarEventsProcessorStack
+                        for(var i = 0; i < totalCalenders; i++){
+                            calendarEventsProcessorStack.push(cacheCalendarEvents);
+                        }
+                        //get previous week's calendar events
+                        for(var j = 0; j < totalCalenders; j++){
+                            service.events.list({
+                                calendarId : calendarList.items[j].id,
+                                timeMax : lastWeek.end,
+                                timeMin : lastWeek.start}).execute(calendarEventsCallbackHandler);
+                        }
+                        
+                    });
+                }
+            
+                return {
+                    load : load,
+                    authenticate: authenticate,
+                    updateAppointmentInformation: updateAppointmentInformation
+                };
+            })();
+            function wasGadgetLoad(){
+            "use strict";
+                calendarServiceProxy.load();
+            }
+        </script>
+        <script src="https://apis.google.com/js/client.js?onload=wasGadgetLoad"></script>
+        
+    <div class="was-gadget-container">
+            
+        <div class="was-gadget-loading">
+            <!--img src="http://weeklyactivitysummary.appspot.com/assets/img/loading.gif"-->
+        </div>            
+            
+        <div class="was-gadget">
+            
+            <a class="hide" href="#" onclick="calendarServiceProxy.authenticate();">Refresh</a>
+            
+            <div class="was-gadget-appointments hide">
+                <h2><i class="icon-was-gadget-calendar"></i>Appointments</h2>
+            <p>Last week, you had <strong><emphasis><span class="was-gadget-total-appointments"></span></emphasis></strong> appointments which consumed at least <strong><emphasis><span class="was-gadget-total-appointment-hours"></span></emphasis></strong> hours of your time.</p>
+            </div>
+            
+            <div class="was-gadget-documents hide">
+                <h2><i class="icon-was-gadget-drive"></i>Your Documents <!--span class="count">(count: <span class="was-gadget-document-count"></span>)</span--></h2>
+                <ul></ul>
+            </div>
+        </div>
+    </div>​
+    ]]>
+  </Content>
+  </Module>
